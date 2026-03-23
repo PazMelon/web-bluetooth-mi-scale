@@ -187,10 +187,31 @@
         }
     }
 </style>
+
+<style>
+    .connection-status {
+        font-size: 14px;
+        padding: 4px 12px;
+        border-radius: 12px;
+        margin-bottom: 12px;
+        display: inline-block;
+    }
+    .connection-status.connected { background: #e8f5e9; color: #2e7d32; }
+    .connection-status.disconnected { background: #ffebee; color: #c62828; }
+
+    .status {
+        font-size: 16px;
+        margin: 8px 0;
+        color: #666;
+    }
+    .status.done { color: #2e7d32; }
+    .status.stabilized { color: #1565c0; }
+</style>
+
 <div class="app">
     <form class="form">
-        <h2>Xiaomi Mi Scale (MIBCS) Web Bluetooth Scanning API Demo</h2>
-        <p>This demo required Chrome 79+ with chrome://flags/#enable-experimental-web-platform-features flag enabled.</p>
+        <h2>Xiaomi Mi Scale S400 — Web Bluetooth Demo</h2>
+        <p>Connect to your Xiaomi Scale S400 via Web Bluetooth to read weight and body composition data.</p>
         <div class="input">
             <label>Age</label>
             <input name="age" type="number" required>
@@ -207,12 +228,25 @@
             </select>
         </div>
     </form>
-    <div class="button start" disabled>Start</div>
-    <div class="loading" hidden>Searching for Mi Scale ...</div>
+    <div class="button start" disabled>Connect to Scale</div>
+    <div class="button stop" hidden style="background:#e53935">Stop Scanning</div>
+    <div class="bindkey-section" hidden style="max-width:400px;text-align:center;margin:12px auto">
+        <div class="input" style="display:flex;align-items:center;margin:8px 0">
+            <label style="min-width:80px;text-align:left">Bind Key</label>
+            <input name="bindkey" type="text" placeholder="32-char hex (optional)" style="border:1px solid #ccc;padding:0 4px;height:24px;font-size:14px;font-family:monospace;width:100%">
+        </div>
+        <small style="color:#999">Get from Xiaomi Cloud via <a href="https://github.com/PiotrMachworski/Xiaomi-cloud-tokens-extractor" target="_blank">Token Extractor</a>. Required for encrypted S400 data.</small>
+    </div>
+    <div class="connection-status" hidden></div>
+    <div class="loading" hidden>Scanning for Mi Scale ...</div>
+    <div class="status"></div>
     <div class="scale" hidden>
         <span class="value">0.0</span>
         <span class="unit">kg</span>
     </div>
+    <div class="impedance-info" hidden style="font-size:14px;color:#666;margin:4px 0"></div>
+    <div class="heart-rate" hidden style="font-size:14px;color:#e53935;margin:4px 0"></div>
+    <div class="timestamp" hidden style="font-size:12px;color:#999;margin:4px 0"></div>
     <div class="progress" hidden>
         <div class="indeterminate"></div>
     </div>
