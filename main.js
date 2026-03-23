@@ -82,115 +82,99 @@ const parseMiBeacon = (dataView) => {
     mac, offset
   };
 };
+// ── AES-CCM Decryption — exact HA xiaomi_ble implementation ──
+// From: https://github.com/Bluetooth-Devices/xiaomi-ble/blob/main/src/xiaomi_ble/parser.py
+//
+// nonce = xiaomi_mac[::-1] + data[2:5] + data[-7:-4]  (12 bytes)
+// encrypted_payload = data[i:-7]   (where i = offset after header)
+// mic = data[-4:]
+// AAD = b"\x11"
+//
+// xiaomi_mac in HA is stored in FORWARD order (34:FA:1C:17:A9:99)
+// [::-1] reverses it to BLE order (99:A9:17:1C:FA:34)
 
-async function decryptWithNonce(nonce, ciphertext) {
-  const key = await crypto.subtle.importKey(
-    'raw', BIND_KEY, { name: 'AES-CTR' }, false, ['encrypt']
-  );
+async function decryptMiBeaconV4V5(fullData, headerOffset) {
+  // fullData = entire raw serviceData bytes
+  // headerOffset = byte offset where encrypted payload starts (after FC+PID+FrameCnt+[MAC]+[Cap])
 
-  // CCM counter block: flags(1) || nonce(N) || counter(Q)
-  // N = nonce.length, Q = 15 - N, flags = Q - 1
-  const Q = 15 - nonce.length;
-  const counterBlock = new Uint8Array(16);
-  counterBlock[0] = Q - 1; // flags
-  counterBlock.set(nonce, 1);
-  counterBlock[15] = 1; // counter = 1 (big-endian)
-
-  const decrypted = await crypto.subtle.encrypt(
-    { name: 'AES-CTR', counter: counterBlock, length: Q * 8 },
-    key,
-    ciphertext
-  );
-
-  return new Uint8Array(decrypted);
-}
-
-// Validate decrypted data: check if event ID is a known S400 event
-function isValidDecryption(data) {
-  if (data.length < 3) return false;
-  const eventId = data[0] | (data[1] << 8);
-  // Known S400 event IDs: 0x03FE (1022) from MiOT spec
-  // Also accept 0x1001-0x1010 range (common MiBeacon events)
-  return eventId === 0x03FE || (eventId >= 0x1001 && eventId <= 0x1010);
-}
-
-async function decryptMiBeacon(frameControl, productId, frameCounter, mac, encryptedData) {
-  // Separate ciphertext and MIC (last 4 bytes)
-  if (encryptedData.length <= 4) {
+  if (fullData.length < headerOffset + 7) {
     console.log('  Not enough data for decryption');
     return null;
   }
 
-  const ciphertext = encryptedData.slice(0, encryptedData.length - 4);
-  const mic = encryptedData.slice(encryptedData.length - 4);
+  // Exact HA construction:
+  // nonce = xiaomi_mac[::-1] + data[2:5] + data[-7:-4]
+  // xiaomi_mac is stored in forward order in HA, [::-1] reverses to BLE order
+  // DEVICE_MAC is already in BLE order: [99, A9, 17, 1C, FA, 34]
+  const nonce = new Uint8Array(12);
+  nonce.set(DEVICE_MAC, 0);                                          // MAC BLE order (6 bytes)
+  nonce.set(fullData.slice(2, 5), 6);                                // data[2:5] = PID(2) + FrameCnt(1) raw bytes
+  nonce.set(fullData.slice(fullData.length - 7, fullData.length - 4), 9); // data[-7:-4] = ext counter (3 bytes)
 
-  console.log(`  Ciphertext (${ciphertext.length}B): ${Array.from(ciphertext).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+  const encryptedPayload = fullData.slice(headerOffset, fullData.length - 7);
+  const mic = fullData.slice(fullData.length - 4);
 
-  // Try multiple nonce constructions — different implementations use different formats
-  const macVariants = [
-    { name: 'BLE order', mac: mac || DEVICE_MAC },
-    { name: 'Forward', mac: DEVICE_MAC_FORWARD },
-  ];
+  const nonceHex = Array.from(nonce).map(b => b.toString(16).padStart(2, '0')).join(' ');
+  const ctHex = Array.from(encryptedPayload).map(b => b.toString(16).padStart(2, '0')).join(' ');
+  const micHex = Array.from(mic).map(b => b.toString(16).padStart(2, '0')).join(' ');
 
-  for (const variant of macVariants) {
-    // Nonce format: frame_ctrl(2) + product_id(2) + frame_counter(1) + mac(6) = 11 bytes
-    const nonce = new Uint8Array(11);
-    nonce[0] = frameControl & 0xFF;
-    nonce[1] = (frameControl >> 8) & 0xFF;
-    nonce[2] = productId & 0xFF;
-    nonce[3] = (productId >> 8) & 0xFF;
-    nonce[4] = frameCounter;
-    nonce.set(variant.mac, 5);
+  console.log(`  Nonce (12B): ${nonceHex}`);
+  console.log(`  Encrypted (${encryptedPayload.length}B): ${ctHex}`);
+  console.log(`  MIC: ${micHex}`);
 
-    try {
-      const decrypted = await decryptWithNonce(nonce, ciphertext);
-      const nonceHex = Array.from(nonce).map(b => b.toString(16).padStart(2, '0')).join(' ');
-      const decHex = Array.from(decrypted).map(b => b.toString(16).padStart(2, '0')).join(' ');
+  // AES-CCM decrypt using AES-CTR (CTR is the decryption part of CCM)
+  // Nonce = 12 bytes → Q = 15 - 12 = 3, flags = Q - 1 = 2
+  const key = await crypto.subtle.importKey(
+    'raw', BIND_KEY, { name: 'AES-CTR' }, false, ['encrypt']
+  );
 
-      if (isValidDecryption(decrypted)) {
-        console.log(`  ✅ Nonce (${variant.name}): ${nonceHex}`);
-        console.log(`  ✅ Decrypted: ${decHex}`);
-        return decrypted;
-      } else {
-        console.log(`  ❌ Nonce (${variant.name}): ${nonceHex} → ${decHex} (invalid eventId=0x${(decrypted[0] | (decrypted[1] << 8)).toString(16)})`);
-      }
-    } catch (e) {
-      console.log(`  ❌ Nonce (${variant.name}): decrypt error: ${e.message}`);
-    }
+  // Counter block A1: flags(1) || nonce(12) || counter(3) = 16 bytes
+  const counterBlock = new Uint8Array(16);
+  counterBlock[0] = 2; // flags = Q - 1 = 2
+  counterBlock.set(nonce, 1); // nonce at bytes 1-12
+  counterBlock[15] = 1; // counter = 1 (big-endian, 3-byte counter)
+
+  const decrypted = await crypto.subtle.encrypt(
+    { name: 'AES-CTR', counter: counterBlock, length: 24 }, // 24 bits = 3 byte counter
+    key,
+    encryptedPayload
+  );
+
+  const decryptedBytes = new Uint8Array(decrypted);
+  const decHex = Array.from(decryptedBytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
+  console.log(`  Decrypted (${decryptedBytes.length}B): ${decHex}`);
+
+  // Validate: first 2 bytes should be event ID 0x03FE for S400
+  if (decryptedBytes.length >= 2) {
+    const eventId = decryptedBytes[0] | (decryptedBytes[1] << 8);
+    console.log(`  Event ID: 0x${eventId.toString(16)} ${eventId === 0x03FE ? '✅' : '❌'}`);
   }
 
-  // If no valid decryption found, return the last attempt for debugging
-  console.log('  ⚠️ No valid decryption found with known nonce formats');
-  // Return raw decrypt with BLE order MAC for debugging
-  const fallbackNonce = new Uint8Array(11);
-  fallbackNonce[0] = frameControl & 0xFF;
-  fallbackNonce[1] = (frameControl >> 8) & 0xFF;
-  fallbackNonce[2] = productId & 0xFF;
-  fallbackNonce[3] = (productId >> 8) & 0xFF;
-  fallbackNonce[4] = frameCounter;
-  fallbackNonce.set(DEVICE_MAC, 5);
-  const fallback = await decryptWithNonce(fallbackNonce, ciphertext);
-  console.log(`  Fallback decrypted: ${Array.from(fallback).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-  return fallback;
+  return decryptedBytes;
 }
 
 // ── Parse decrypted MiBeacon object ──
+// Format: objectId(2, LE) + length(1) + data(N)
+// For S400: data = PIID(1) + packedValue(4) + ...
 function parseDecryptedObject(data) {
-  if (data.length < 3) return null;
+  if (data.length < 7) return null;
 
-  const eventId = data[0] | (data[1] << 8);
-  const eventLen = data[2];
-  const eventData = data.slice(3, 3 + eventLen);
+  const objectId = data[0] | (data[1] << 8);
+  const dataLen = data[2];
+  const piid = data[3]; // Property Instance ID (usually 0x01)
 
-  // Read event value as little-endian integer
-  let eventValue = 0;
-  for (let i = 0; i < eventData.length && i < 4; i++) {
-    eventValue |= eventData[i] << (i * 8);
+  // S400 packed value is a uint32LE starting at byte 4
+  // (after objectId(2) + len(1) + piid(1))
+  let packedValue = 0;
+  for (let i = 0; i < 4 && (4 + i) < data.length; i++) {
+    packedValue |= data[4 + i] << (i * 8);
   }
+  // Ensure unsigned
+  packedValue = packedValue >>> 0;
 
-  console.log(`  Object: eventId=0x${eventId.toString(16)} len=${eventLen} value=${eventValue} (0x${eventValue.toString(16)})`);
+  console.log(`  Object: id=0x${objectId.toString(16)} len=${dataLen} piid=${piid} packed=0x${packedValue.toString(16)} (${packedValue})`);
 
-  return { eventId, eventLen, eventValue };
+  return { objectId, dataLen, piid, packedValue };
 }
 
 // ── Update UI ──
@@ -261,23 +245,21 @@ const onAdvertisement = async (event) => {
         if (!beacon) return;
 
         if (beacon.isEncrypted && beacon.hasObject) {
-          // ENCRYPTED event data — decrypt it!
+          // ENCRYPTED event data — decrypt with exact HA implementation
           console.log('  🔐 Encrypted event detected — decrypting...');
-          const encryptedPayload = new Uint8Array(
-            dataView.buffer, dataView.byteOffset + beacon.offset,
-            dataView.byteLength - beacon.offset
-          );
+
+          // Pass the FULL raw serviceData bytes (HA uses raw byte offsets like data[2:5])
+          const fullData = new Uint8Array(dataView.buffer, dataView.byteOffset, dataView.byteLength);
 
           try {
-            const decrypted = await decryptMiBeacon(
-              beacon.frameControl, beacon.productId, beacon.frameCounter,
-              beacon.mac, encryptedPayload
-            );
+            const decrypted = await decryptMiBeaconV4V5(fullData, beacon.offset);
 
             if (decrypted) {
               const obj = parseDecryptedObject(decrypted);
-              if (obj && obj.eventValue > 1) {
-                const parsed = parseS400Value(obj.eventValue);
+              if (obj && obj.packedValue > 0) {
+                // S400 Body Composition Object ID is 0x6e16 (28182).
+                // Or we just check if it parsed a valid packed value.
+                const parsed = parseS400Value(obj.packedValue);
                 console.log(`  🏋️ weight=${parsed.weight}kg hr=${parsed.heartRate}bpm impedance=${parsed.impedance}Ω`);
                 if (parsed.weight > 0 && parsed.weight < 300) {
                   updateConnectionStatus(true, deviceName);
