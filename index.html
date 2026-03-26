@@ -1,254 +1,360 @@
-<title>Xiaomi Mi Scale (MIBCS) Web Bluetooth Scanning API Demo</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="/favicon.ico">
-<script async src="https://www.googletagmanager.com/gtag/js?id=UA-57741199-16"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-
-  gtag('config', 'UA-57741199-16');
-</script>
-
-<style>
-    body {
-        margin: 0;
-        font-family: sans-serif;
-        color: #4a4a4a;
-        display: flex;
-        flex-direction: column;
-        padding: 0 16px;
-    }
-
-    .app {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-direction: column;
-        flex: 1;
-    }
-
-    .form {
-        margin-bottom: 24px;
-        max-width: 400px;
-        text-align: center;
-    }
-
-    .form p {
-        margin-bottom: 36px;
-    }
-
-    .form .input {
-        display: flex;
-        align-items: center;
-        margin: 12px 0;
-    }
-
-    .form .input label {
-        min-width: 100px;
-        display: block;
-        margin-right: 8px;
-        text-align: left;
-    }
-
-    .form .input input,
-    .form .input select {
-        border: 1px solid #cccccc;
-        padding: 0 4px;
-        height: 24px;
-        font-size: 16px;
-        width: 100%;
-    }
-
-    .button {
-        margin: 16px 0;
-        background: #1973e8;
-        color: #fff;
-        padding: 12px 22px;
-        border-radius: 8px;
-        min-width: 120px;
-        text-align: center;
-        cursor: pointer;
-        user-select: none;
-    }
-
-    .button[disabled] {
-        pointer-events: none;
-        background-color: #929292;
-    }
-
-    .scale {
-        font-size: 96px;
-        font-weight: bold;
-        color: #000;
-    }
-
-    .unit {
-        margin-left: -16px;
-        font-size: 36px;
-    }
-
-    .result {
-        width: 80%;
-        max-width: 240px;
-        margin: 0 auto;
-        padding-top: 24px;
-    }
-
-    .result .item {
-        display: flex;
-    }
-
-    .result .item .name {
-        flex: 1;
-        font-weight: 600;
-    }
-
-    .progress {
-        position: relative;
-        height: 6px;
-        width: 100%;
-        max-width: 180px;
-        background-color: #e3f2fd;
-        border-radius: 2px;
-        background-clip: padding-box;
-        margin: 0.5rem 0 1rem 0;
-        overflow: hidden;
-    }
-
-    .progress .indeterminate {
-        background-color: #1e88e5;
-    }
-
-    .progress .indeterminate:before {
-        content: '';
-        position: absolute;
-        background-color: inherit;
-        top: 0;
-        left: 0;
-        bottom: 0;
-        will-change: left, right;
-        animation: indeterminate 1.7s cubic-bezier(0.65, 0.815, 0.735, 0.395) infinite;
-    }
-
-    .progress .indeterminate:after {
-        content: '';
-        position: absolute;
-        background-color: inherit;
-        top: 0;
-        left: 0;
-        bottom: 0;
-        will-change: left, right;
-        animation: indeterminate-short 1.7s cubic-bezier(0.165, 0.84, 0.44, 1) infinite;
-        animation-delay: 1s;
-    }
-
-    footer {
-        text-align: center;
-        padding: 8px 0;
-        font-size: 15px;
-    }
-
-    footer a {
-        margin: 0 8px;
-    }
-
-    @keyframes indeterminate {
-        0% {
-            left: -35%;
-            right: 100%;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>St. Rita's College of Balingasag Clinic - Vital Kiosk</title>
+    <link rel="icon" href="/favicon.ico">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #004D99; /* SRCB Blue */
+            --primary-light: #337acc;
+            --white: #ffffff;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+            --bg-color: #f0f4f8;
+            --glass-bg: rgba(255, 255, 255, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.3);
+            --danger: #e11d48;
+            --success: #059669;
         }
 
-        60% {
-            left: 100%;
-            right: -90%;
+        body {
+            margin: 0;
+            font-family: 'Outfit', sans-serif;
+            color: var(--text-main);
+            background: linear-gradient(135deg, #e0eaf5 0%, #b8d0eb 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            user-select: none;
         }
 
-        100% {
-            left: 100%;
-            right: -90%;
+        .kiosk-container {
+            width: 100%;
+            max-width: 800px;
+            height: 90vh;
+            max-height: 1000px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 32px;
+            box-shadow: 0 25px 50px -12px rgba(0, 77, 153, 0.15);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
         }
-    }
 
-    @keyframes indeterminate-short {
-        0% {
-            left: -200%;
-            right: 100%;
+        .header {
+            padding: 30px;
+            text-align: center;
+            border-bottom: 1px solid rgba(0, 77, 153, 0.1);
         }
 
-        60% {
-            left: 107%;
-            right: -8%;
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--primary);
+            letter-spacing: -0.5px;
         }
 
-        100% {
-            left: 107%;
-            right: -8%;
+        .header p {
+            margin: 5px 0 0 0;
+            font-size: 16px;
+            color: var(--text-muted);
+            font-weight: 400;
         }
-    }
-</style>
 
-<style>
-    .connection-status {
-        font-size: 14px;
-        padding: 4px 12px;
-        border-radius: 12px;
-        margin-bottom: 12px;
-        display: inline-block;
-    }
-    .connection-status.connected { background: #e8f5e9; color: #2e7d32; }
-    .connection-status.disconnected { background: #ffebee; color: #c62828; }
+        .main-content {
+            flex: 1;
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
 
-    .status {
-        font-size: 16px;
-        margin: 8px 0;
-        color: #666;
-    }
-    .status.done { color: #2e7d32; }
-    .status.stabilized { color: #1565c0; }
-</style>
+        /* Views */
+        .view {
+            display: none;
+            width: 100%;
+            height: 100%;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            animation: fadeIn 0.4s ease-out forwards;
+        }
+        .view.active {
+            display: flex;
+        }
 
-<div class="app">
-    <form class="form">
-        <h2>Xiaomi Mi Scale S400 — Web Bluetooth Demo</h2>
-        <p>Connect to your Xiaomi Scale S400 via Web Bluetooth to read weight and body composition data.</p>
-        <div class="input">
-            <label>Age</label>
-            <input name="age" type="number" required>
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Admin / Init View */
+        .btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 16px 32px;
+            border-radius: 100px;
+            font-size: 18px;
+            font-weight: 600;
+            font-family: 'Outfit', sans-serif;
+            cursor: pointer;
+            box-shadow: 0 10px 25px -5px rgba(0, 77, 153, 0.4);
+            transition: all 0.2s ease;
+        }
+        .btn:active {
+            transform: scale(0.97);
+            box-shadow: 0 4px 10px -2px rgba(0, 77, 153, 0.4);
+        }
+        .btn.outline {
+            background: transparent;
+            color: var(--primary);
+            border: 2px solid var(--primary);
+            box-shadow: none;
+        }
+
+        .status-badge {
+            margin-top: 20px;
+            padding: 8px 16px;
+            border-radius: 100px;
+            font-size: 14px;
+            font-weight: 500;
+            background: rgba(225, 29, 72, 0.1);
+            color: var(--danger);
+        }
+        .status-badge.connected {
+            background: rgba(5, 150, 105, 0.1);
+            color: var(--success);
+        }
+
+        /* Input / Numpad View */
+        .input-group {
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .input-group label {
+            display: block;
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: var(--text-main);
+        }
+        .id-display {
+            width: 100%;
+            height: 60px;
+            background: white;
+            border: 2px solid var(--primary-light);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: 4px;
+            color: var(--primary);
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.05);
+            margin-bottom: 20px;
+        }
+        
+        .numpad {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            width: 100%;
+            max-width: 320px;
+        }
+        .num-key {
+            background: white;
+            border: 1px solid rgba(0,0,0,0.05);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+            border-radius: 16px;
+            height: 70px;
+            font-size: 24px;
+            font-weight: 600;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.1s;
+            font-family: 'Outfit';
+        }
+        .num-key:active {
+            background: var(--primary-light);
+            color: white;
+            transform: scale(0.95);
+        }
+        .num-key.action {
+            background: var(--primary);
+            color: white;
+        }
+        .num-key.delete {
+            background: #f87171;
+            color: white;
+        }
+
+        /* Measurement View */
+        .measurement-ui {
+            text-align: center;
+        }
+        .loader-ring {
+            width: 120px;
+            height: 120px;
+            border: 6px solid rgba(0, 77, 153, 0.1);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 30px auto;
+        }
+        
+        .measured-values {
+            display: flex;
+            gap: 30px;
+            margin-top: 30px;
+            justify-content: center;
+        }
+        .value-card {
+            background: white;
+            padding: 20px 30px;
+            border-radius: 20px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+            min-width: 120px;
+        }
+        .value-card p {
+            margin: 0 0 5px 0;
+            font-size: 14px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 600;
+        }
+        .value-card h2 {
+            margin: 0;
+            font-size: 36px;
+            color: var(--primary);
+        }
+
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+        /* Error/Messages */
+        .error-text {
+            color: var(--danger);
+            font-weight: 500;
+            margin-top: 15px;
+            height: 24px;
+        }
+
+        .student-info { margin-bottom: 20px; font-size: 24px; color: var(--primary); font-weight: 600;}
+        .student-subinfo { font-size: 16px; color: var(--text-muted); margin-bottom: 30px; }
+
+    </style>
+</head>
+<body>
+
+    <div class="kiosk-container">
+        
+        <div class="header">
+            <h1>St. Rita's College of Balingasag</h1>
+            <p>Clinic Vital Kiosk</p>
         </div>
-        <div class="input">
-            <label>Height (cm)</label>
-            <input name="height" type="number" required>
+
+        <div class="main-content">
+            
+            <!-- View 1: Admin Connect -->
+            <div id="view-admin" class="view active">
+                <img src="/favicon.ico" alt="Logo" style="width: 80px; margin-bottom: 20px;">
+                <h2 style="margin-bottom: 30px; color: var(--primary)">Hardware Setup</h2>
+                <button class="btn" id="btn-connect">Connect Scales via Bluetooth</button>
+                <div class="status-badge" id="ble-status">🔴 Disconnected</div>
+            </div>
+
+            <!-- View 2: Idle Input ID -->
+            <div id="view-input" class="view">
+                <div class="input-group">
+                    <label>Enter Student ID Number</label>
+                    <div class="id-display" id="id-display"></div>
+                </div>
+
+                <div class="numpad">
+                    <div class="num-key" data-val="1">1</div>
+                    <div class="num-key" data-val="2">2</div>
+                    <div class="num-key" data-val="3">3</div>
+                    <div class="num-key" data-val="4">4</div>
+                    <div class="num-key" data-val="5">5</div>
+                    <div class="num-key" data-val="6">6</div>
+                    <div class="num-key" data-val="7">7</div>
+                    <div class="num-key" data-val="8">8</div>
+                    <div class="num-key" data-val="9">9</div>
+                    <div class="num-key delete" id="btn-del">DEL</div>
+                    <div class="num-key" data-val="0">0</div>
+                    <div class="num-key action" id="btn-enter">Enter</div>
+                    <!-- Added dash for IDs with dash -->
+                    <div class="num-key" data-val="-" style="grid-column: span 3; height: 50px;">- (Dash)</div>
+                </div>
+
+                <div class="error-text" id="input-error"></div>
+            </div>
+
+            <!-- View 3: Measurement -->
+            <div id="view-measure" class="view">
+                <div class="student-info" id="measuring-name"></div>
+                <div class="student-subinfo">Please step on the scale barefoot.</div>
+                
+                <div class="loader-ring"></div>
+                <h2 style="color: var(--primary); margin: 0;">Ready to Take Measurement</h2>
+                <p style="color: var(--text-muted)">Waiting for scale...</p>
+
+                <div class="measured-values" style="display: none;" id="live-values">
+                    <div class="value-card">
+                        <p>Weight (kg)</p>
+                        <h2 id="live-weight">--</h2>
+                    </div>
+                    <div class="value-card" id="hr-card">
+                        <p>Heart Rate</p>
+                        <h2 id="live-hr">-- <small style="font-size:14px">bpm</small></h2>
+                    </div>
+                </div>
+
+                <button class="btn outline" id="btn-cancel" style="margin-top: 40px; font-size: 14px; padding: 10px 20px;">Cancel</button>
+            </div>
+
+            <!-- View 4: Success -->
+            <div id="view-success" class="view">
+                <div style="width: 80px; height: 80px; background: rgba(5, 150, 105, 0.1); color: var(--success); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 40px; margin-bottom: 20px;">
+                    ✓
+                </div>
+                <h2 style="color: var(--success); margin-bottom: 10px;">Measurement Saved!</h2>
+                <p style="color: var(--text-muted); font-size: 18px; margin-bottom: 30px;">Thank you. You may now step off the scale.</p>
+                
+                <div class="measured-values">
+                    <div class="value-card">
+                        <p>Weight</p>
+                        <h2 id="final-weight"></h2>
+                    </div>
+                    <div class="value-card" id="final-hr-card">
+                        <p>Heart Rate</p>
+                        <h2 id="final-hr"></h2>
+                    </div>
+                </div>
+            </div>
+
         </div>
-        <div class="input">
-            <label>Gender</label>
-            <select name="gender">
-                <option value="female">Female</option>
-                <option value="male">Male</option>
-            </select>
-        </div>
-    </form>
-    <div class="button start" disabled>Connect to Scale</div>
-    <div class="button stop" hidden style="background:#e53935">Stop Scanning</div>
-    <div class="connection-status" hidden></div>
-    <div class="loading" hidden>Scanning for Mi Scale ...</div>
-    <div class="status"></div>
-    <div class="scale" hidden>
-        <span class="value">0.0</span>
-        <span class="unit">kg</span>
     </div>
-    <div class="impedance-info" hidden style="font-size:14px;color:#666;margin:4px 0"></div>
-    <div class="heart-rate" hidden style="font-size:14px;color:#e53935;margin:4px 0"></div>
-    <div class="timestamp" hidden style="font-size:12px;color:#999;margin:4px 0"></div>
-    <div class="progress" hidden>
-        <div class="indeterminate"></div>
-    </div>
-    <div class="result" hidden></div>
-</div>
-<footer>
-    <a href="https://dev.to/henrylim96/reading-xiaomi-mi-scale-data-with-web-bluetooth-scanning-api-1mb9" target="_blank" rel="noopener noreferrer">Blog</a>
-    <a href="https://github.com/limhenry/web-bluetooth-mi-scale" target="_blank" rel="noopener noreferrer">GitHub</a>
-    <a href="https://twitter.com/henrylim96" target="_blank" rel="noopener noreferrer">Twitter</a>
-</footer>
 
-<script src="./main.js"></script>
+    <!-- The actual functionality -->
+    <script type="module" src="./main.js"></script>
+</body>
+</html>
