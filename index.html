@@ -138,6 +138,74 @@
             color: var(--success);
         }
 
+        /* Bluetooth Connectivity Indicator */
+        .connectivity-bar {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.6);
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--primary);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--glass-border);
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            z-index: 100;
+        }
+        .connectivity-bar:hover {
+            background: white;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(0,0,0,0.1);
+        }
+        .connectivity-bar:active {
+            transform: translateY(0);
+        }
+        .conn-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #94a3b8; /* Gray default */
+        }
+        .conn-dot.active {
+            background: var(--success);
+            box-shadow: 0 0 10px var(--success);
+            animation: pulse-green 2s infinite;
+        }
+        .conn-dot.warning {
+            background: #eab308; /* Yellow */
+            animation: pulse-yellow 2s infinite;
+        }
+        .conn-dot.syncing {
+            background: #3b82f6; /* Blue */
+            animation: pulse-blue 2s infinite;
+        }
+        .conn-dot.error {
+            background: var(--danger);
+        }
+
+        @keyframes pulse-green {
+            0% { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(5, 150, 105, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0); }
+        }
+        @keyframes pulse-yellow {
+            0% { box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(234, 179, 8, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(234, 179, 8, 0); }
+        }
+        @keyframes pulse-blue {
+            0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+        }
+
         /* Input / Numpad View */
         .input-group {
             width: 100%;
@@ -266,6 +334,12 @@
 
     <div class="kiosk-container">
         
+        <!-- Bluetooth Connectivity Bar -->
+        <div class="connectivity-bar" id="conn-bar">
+            <div class="conn-dot" id="conn-dot"></div>
+            <span id="conn-text">Bluetooth: Inactive</span>
+        </div>
+
         <div class="header">
             <h1>St. Rita's College of Balingasag</h1>
             <p>Clinic Vital Kiosk</p>

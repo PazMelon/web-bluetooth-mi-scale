@@ -26,7 +26,10 @@ app.get('/api/student/:id_number', async (req, res) => {
     try {
         const idNumber = req.params.id_number;
         const [rows] = await pool.query(
-            'SELECT profile_id, id_number, first_name, last_name, status FROM student_profile WHERE id_number = ? LIMIT 1',
+            `SELECT u.id AS profile_id, u.id_number, s.first_name, s.last_name 
+             FROM users u 
+             INNER JOIN student_profile s ON u.id_number = s.id_number 
+             WHERE u.id_number = ? LIMIT 1`,
             [idNumber]
         );
 
@@ -60,8 +63,8 @@ app.post('/api/vitals', async (req, res) => {
 
         res.json({ success: true, message: 'Vitals saved successfully', insertId: result.insertId });
     } catch (error) {
-        console.error('Error saving vitals:', error);
-        res.status(500).json({ success: false, message: 'Server error saving vitals.' });
+        console.error('❌ SQL Error saving vitals:', error.message, error.code, error.sqlMessage);
+        res.status(500).json({ success: false, message: error.sqlMessage || error.message || 'Server error saving vitals.' });
     }
 });
 

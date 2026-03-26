@@ -1,6 +1,11 @@
 import Metrics from './metrics'
 
-let scan = null;
+let activeDevice = null;
+let wakeLock = null;
+let lastSeenPacket = 0; 
+let isSyncing = false;
+let syncTimeoutId = null; 
+
 const BIND_KEY_HEX = 'fe124135b623f23c202f4dae69d41836';
 const BIND_KEY = hexToBytes(BIND_KEY_HEX);
 const DEVICE_MAC = new Uint8Array([0x99, 0xA9, 0x17, 0x1C, 0xFA, 0x34]);
@@ -11,6 +16,14 @@ function hexToBytes(hex) {
     bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
   }
   return bytes;
+}
+
+// ============== CRYPTO CACHING ==============
+let CRYPTO_KEY = null;
+async function getCryptoKey() {
+    if (CRYPTO_KEY) return CRYPTO_KEY;
+    CRYPTO_KEY = await crypto.subtle.importKey('raw', BIND_KEY, { name: 'AES-CTR' }, false, ['encrypt']);
+    return CRYPTO_KEY;
 }
 
 const parseS400Value = (value) => {
@@ -54,7 +67,7 @@ async function decryptMiBeaconV4V5(fullData, headerOffset) {
   nonce.set(fullData.slice(fullData.length - 7, fullData.length - 4), 9); 
 
   const encryptedPayload = fullData.slice(headerOffset, fullData.length - 7);
-  const key = await crypto.subtle.importKey('raw', BIND_KEY, { name: 'AES-CTR' }, false, ['encrypt']);
+  const key = await getCryptoKey(); 
 
   const counterBlock = new Uint8Array(16);
   counterBlock[0] = 2; 
@@ -81,6 +94,23 @@ function parseDecryptedObject(data) {
   packedValue = packedValue >>> 0;
   return { objectId, dataLen, piid, packedValue };
 }
+
+// ============== SCREEN WAKE LOCK ==============
+
+async function requestWakeLock() {
+    try {
+        if ('wakeLock' in navigator) {
+            wakeLock = await navigator.wakeLock.request('screen');
+            console.log('💡 Screen Wake Lock is active');
+        }
+    } catch (err) { console.warn(`💡 Wake Lock failed: ${err.name}, ${err.message}`); }
+}
+
+document.addEventListener('visibilitychange', async () => {
+    if (wakeLock !== null && document.visibilityState === 'visible') {
+        await requestWakeLock();
+    }
+});
 
 // ============== STATE MACHINE & KIOSK LOGIC ==============
 
@@ -127,14 +157,12 @@ function updateIdDisplay() {
 // -- Submit Student ID --
 document.getElementById('btn-enter').addEventListener('click', async () => {
   if (!currentInputId) return;
-  
   const errorEl = document.getElementById('input-error');
   errorEl.innerText = 'Validating...';
 
   try {
       const res = await fetch(`${API_BASE}/student/${currentInputId}`);
       const data = await res.json();
-      
       if (data.success) {
           currentStudent = data.student;
           startMeasurementProcess();
@@ -143,16 +171,13 @@ document.getElementById('btn-enter').addEventListener('click', async () => {
           currentInputId = 'C';
           updateIdDisplay();
       }
-  } catch(e) {
-      console.error(e);
-      errorEl.innerText = 'Server connection error';
-  }
+  } catch(e) { console.error(e); errorEl.innerText = 'Server error'; }
 });
 
 // -- Measurement Logic --
 
 let isMeasuring = false;
-let weightHistory = []; // To check stabilization
+let weightHistory = []; 
 let stabilizedWeight = 0;
 let finalHeartRate = 0;
 let hrTimeoutId = null; 
@@ -163,34 +188,45 @@ function startMeasurementProcess() {
   
   document.querySelector('.loader-ring').style.display = 'block';
   document.querySelector('#view-measure h2').innerText = 'Ready to Take Measurement';
-  document.querySelector('#view-measure p').innerText = 'Waiting for scale...';
+  document.querySelector('#view-measure p').innerText = 'Please step on the scale...';
   
   document.getElementById('live-values').style.display = 'none';
   document.getElementById('live-weight').innerText = '--';
   document.getElementById('live-hr').innerHTML = '-- <small style="font-size:14px">bpm</small>';
 
-  isMeasuring = true;
   weightHistory = [];
   stabilizedWeight = 0;
   finalHeartRate = 0;
+  clearTimeout(hrTimeoutId);
+  hrTimeoutId = null;
+  isMeasuring = true;
+
   switchView(VIEWS.MEASURE);
 }
 
-document.getElementById('btn-cancel').addEventListener('click', () => {
-  resetKiosk();
-});
+document.getElementById('btn-cancel').addEventListener('click', () => { resetKiosk(); });
 
 function resetKiosk() {
   isMeasuring = false;
   currentStudent = null;
   currentInputId = 'C';
-  updateIdDisplay();
+  weightHistory = [];
+  stabilizedWeight = 0;
+  finalHeartRate = 0;
   clearTimeout(hrTimeoutId);
+  hrTimeoutId = null;
+  updateIdDisplay();
   switchView(VIEWS.INPUT);
 }
 
 const onAdvertisement = async (event) => {
-  if (!isMeasuring) return; // Only process when we are actively measuring a student
+  lastSeenPacket = Date.now();
+  if (isSyncing) {
+      isSyncing = false;
+      clearTimeout(syncTimeoutId);
+  }
+
+  if (!isMeasuring) return;
   
   if (event.serviceData && event.serviceData.size > 0) {
     event.serviceData.forEach(async (dataView, uuid) => {
@@ -205,15 +241,14 @@ const onAdvertisement = async (event) => {
           const fullData = new Uint8Array(dataView.buffer, dataView.byteOffset, dataView.byteLength);
           try {
             const decrypted = await decryptMiBeaconV4V5(fullData, beacon.offset);
+            if (!isMeasuring) return;
             if (decrypted) {
               const obj = parseDecryptedObject(decrypted);
               if (obj && obj.packedValue > 0) {
                 parsedData = parseS400Value(obj.packedValue);
               }
             }
-          } catch (e) {
-             console.warn('Decryption fail', e);
-          }
+          } catch (e) { }
         } else if (!beacon.isEncrypted && beacon.hasObject) {
             const eventData = new Uint8Array(dataView.buffer, dataView.byteOffset + beacon.offset, dataView.byteLength - beacon.offset);
             const obj = parseDecryptedObject(eventData);
@@ -222,10 +257,9 @@ const onAdvertisement = async (event) => {
             }
         }
         
-        if (parsedData && parsedData.weight > 0) {
+        if (isMeasuring && parsedData && parsedData.weight > 0) {
             processMeasurement(parsedData.weight, parsedData.heartRate);
         }
-
       }
     });
   }
@@ -234,7 +268,6 @@ const onAdvertisement = async (event) => {
 function processMeasurement(weight, hr) {
     if (!isMeasuring) return;
 
-    // Show live UI
     document.querySelector('.loader-ring').style.display = 'none';
     document.querySelector('#view-measure h2').innerText = 'Measuring...';
     document.querySelector('#view-measure p').innerText = 'Please stand still.';
@@ -244,7 +277,6 @@ function processMeasurement(weight, hr) {
         document.getElementById('live-hr').innerHTML = `${hr} <small style="font-size:14px">bpm</small>`;
     }
     
-    // If we receive a heart rate > 0, the scale has definitely finished taking ALL measurements (including impedance/HR)
     if (hr > 0) {
         stabilizedWeight = weight;
         finalHeartRate = hr;
@@ -252,58 +284,75 @@ function processMeasurement(weight, hr) {
         return;
     }
 
-    // Check for weight stabilization (4 identical weights in a row)
-    if (stabilizedWeight === 0) {
-        weightHistory.push(weight);
-        if (weightHistory.length > 4) weightHistory.shift();
+    weightHistory.push(parseFloat(weight.toFixed(1)));
+    if (weightHistory.length > 3) weightHistory.shift();
 
-        if (weightHistory.length === 4 && weightHistory.every(w => w === weight)) {
-             stabilizedWeight = weight;
-             document.querySelector('#view-measure p').innerText = 'Weight captured...';
-             
-             // Since HR usually comes at the same time or immediately after, 
-             // we only wait 3.5 seconds. If the HR calculation failed on the 
-             // scale, it just broadcasts the weight forever, so we must timeout.
-             hrTimeoutId = setTimeout(() => {
-                 if (isMeasuring && finalHeartRate === 0) {
-                     finalizeMeasurement();
-                 }
-             }, 3500);
-        }
-    } 
+    if (weightHistory.length === 3 && weightHistory.every(w => w === weightHistory[0])) {
+        stabilizedWeight = weight;
+        finalHeartRate = 0;
+        finalizeMeasurement();
+    }
 }
 
 async function finalizeMeasurement() {
+    if (!isMeasuring) return;
     isMeasuring = false;
     clearTimeout(hrTimeoutId);
 
-    // Go to success screen immediately
-    document.getElementById('final-weight').innerText = `${stabilizedWeight.toFixed(2)} kg`;
-    document.getElementById('final-hr').innerText = finalHeartRate > 0 ? `${finalHeartRate} bpm` : 'N/A';
+    const studentId = currentStudent ? currentStudent.profile_id : null;
+    const weight = stabilizedWeight;
+    const hr = finalHeartRate;
+
+    document.getElementById('final-weight').innerText = `${weight.toFixed(2)} kg`;
+    document.getElementById('final-hr').innerText = hr > 0 ? `${hr} bpm` : 'N/A';
     switchView(VIEWS.SUCCESS);
 
     try {
-        await fetch(`${API_BASE}/vitals`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                user_id: currentStudent.profile_id,
-                weight_kg: stabilizedWeight,
-                heart_rate: finalHeartRate > 0 ? finalHeartRate : null
-            })
-        });
+        if (studentId && weight > 0) {
+            const response = await fetch(`${API_BASE}/vitals`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: studentId, weight_kg: weight, heart_rate: hr > 0 ? hr : null })
+            });
+            const result = await response.json();
+            if (result.success) {
+                document.getElementById('final-hr').innerHTML += '<br/><span style="color:#22c55e; font-size:12px;">Saved to Database</span>';
+            } else {
+                document.getElementById('final-hr').innerHTML += `<br/><span style="color:#ef4444; font-size:12px;">Error: ${result.message}</span>`;
+            }
+        }
     } catch (e) {
-        console.error('Failed to save to database', e);
+        document.getElementById('final-hr').innerHTML += `<br/><span style="color:#ef4444; font-size:12px;">Network Error: ${e.message}</span>`;
+    } finally {
+        setTimeout(() => { resetKiosk(); }, 5000);
     }
-
-    // Reset after 5 seconds
-    setTimeout(() => {
-        resetKiosk();
-    }, 5000);
 }
 
+// ============== BT RECOVERY & AUTOCONNECT ==============
 
-// -- BT Init Logic --
+async function startScaleListener(device) {
+    try {
+        activeDevice = device;
+        console.log(`🔄 Attaching Scale Listener to ${device.name}`);
+        
+        await activeDevice.watchAdvertisements();
+        
+        activeDevice.removeEventListener('advertisementreceived', onAdvertisement);
+        activeDevice.addEventListener('advertisementreceived', onAdvertisement);
+        
+        // REDUNDANCY: Handlers on both levels
+        navigator.bluetooth.removeEventListener('advertisementreceived', onAdvertisement);
+        navigator.bluetooth.addEventListener('advertisementreceived', onAdvertisement);
+        
+        const statusEl = document.getElementById('ble-status');
+        statusEl.innerText = '🟢 Connected to ' + device.name;
+        statusEl.classList.add('connected');
+        
+        await requestWakeLock();
+        return true;
+    } catch (e) { console.error('Failed to start listener:', e); return false; }
+}
+
 document.getElementById('btn-connect').addEventListener('click', async () => {
   try {
     const device = await navigator.bluetooth.requestDevice({
@@ -311,19 +360,79 @@ document.getElementById('btn-connect').addEventListener('click', async () => {
       optionalServices: ['0000fe95-0000-1000-8000-00805f9b34fb']
     });
 
-    scan = await navigator.bluetooth.requestLEScan({ acceptAllAdvertisements: true });
-    navigator.bluetooth.addEventListener('advertisementreceived', onAdvertisement);
-
-    const statusEl = document.getElementById('ble-status');
-    statusEl.innerText = '🟢 Connected to ' + device.name;
-    statusEl.classList.add('connected');
-    
-    // Automatically switch to Input view after 1.5 seconds
-    setTimeout(() => {
-        switchView(VIEWS.INPUT);
-    }, 1500);
-
-  } catch (e) {
-      alert(`Error starting Bluetooth: ${e.message}`);
-  }
+    await startScaleListener(device);
+    setTimeout(() => { switchView(VIEWS.INPUT); }, 1500);
+  } catch (e) { alert(`Error starting Bluetooth: ${e.message}`); }
 });
+
+// Re-sync on click
+document.getElementById('conn-bar').addEventListener('click', async () => {
+    if (!activeDevice) {
+        document.getElementById('btn-connect').click();
+        return;
+    }
+
+    console.log('🔄 Recovery: Re-syncing bluetooth listener...');
+    isSyncing = true;
+    
+    // Auto-timeout for re-sync status
+    clearTimeout(syncTimeoutId);
+    syncTimeoutId = setTimeout(() => { isSyncing = false; }, 10000);
+    
+    await startScaleListener(activeDevice);
+});
+
+
+// Autonomous Start: Try to find previously paired devices
+async function autoConnectPreviouslyPaired() {
+    if (!navigator.bluetooth.getDevices) return;
+    
+    try {
+        const devices = await navigator.bluetooth.getDevices();
+        const xiDevice = devices.find(d => d.name && d.name.includes('Xiaomi'));
+        
+        if (xiDevice) {
+            console.log(`🤖 Autonomous Start: Found ${xiDevice.name}`);
+            const success = await startScaleListener(xiDevice);
+            if (success) {
+                switchView(VIEWS.INPUT);
+            }
+        }
+    } catch (err) { console.warn('Auto-connect failed', err); }
+}
+
+// ============== CONNECTIVITY MONITOR UI ==============
+
+function updateConnectivityUI() {
+    const dot = document.getElementById('conn-dot');
+    const text = document.getElementById('conn-text');
+    if (!dot || !text) return;
+
+    if (!activeDevice) {
+        dot.className = 'conn-dot';
+        text.innerText = 'Bluetooth: Tap to Start';
+        return;
+    }
+
+    if (isSyncing) {
+        dot.className = 'conn-dot syncing';
+        text.innerText = 'Re-syncing... Step on Scale!';
+        return;
+    }
+
+    const secondsSinceLast = (Date.now() - lastSeenPacket) / 1000;
+
+    if (lastSeenPacket === 0) {
+        dot.className = 'conn-dot warning';
+        text.innerText = 'Looking for Scale...';
+    } else if (secondsSinceLast < 10) {
+        dot.className = 'conn-dot active';
+        text.innerText = 'Scale Active';
+    } else {
+        dot.className = 'conn-dot warning';
+        text.innerText = 'Scale Sleeping (Step on to Wake)';
+    }
+}
+
+setInterval(updateConnectivityUI, 1000);
+autoConnectPreviouslyPaired(); // Kick off auto-connect on load
